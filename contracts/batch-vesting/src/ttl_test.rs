@@ -31,9 +31,10 @@ fn test_ttl_bumping_logic() {
         &Vec::from_array(&env, [token.address.clone()]),
         &Vec::from_array(&env, [recipient.clone()]),
         &Vec::from_array(&env, [1000]),
-        &1000,
-        &2000,
-        &0,
+        &1000, // start_time
+        &2000, // end_time
+        &1000, // cliff_time (#243)
+        &0,    // vesting_step
         &Vec::from_array(&env, [soroban_sdk::String::from_str(&env, "Test Memo")]),
     );
 

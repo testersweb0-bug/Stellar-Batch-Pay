@@ -53,6 +53,14 @@
                       "val": {
                         "u32": 10
                       }
+                    },
+                    {
+                      "key": {
+                        "symbol": "upgrade_timelock"
+                      },
+                      "val": {
+                        "u64": 100
+                      }
                     }
                   ]
                 }
@@ -198,6 +206,14 @@
                       },
                       "val": {
                         "u32": 10
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "upgrade_timelock"
+                      },
+                      "val": {
+                        "u64": 100
                       }
                     }
                   ]

@@ -91,7 +91,8 @@ fn test_deposit_and_claim() {
         &amounts, 
         &0, 
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, ""), String::from_str(&env, "")])
     );
 
@@ -141,7 +142,8 @@ fn test_revoke_by_sender() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -186,7 +188,8 @@ fn test_claim_after_revoke_fails() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
     env.ledger().with_mut(|li| {
@@ -230,7 +233,8 @@ fn test_revoke_by_admin_fails() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -276,7 +280,8 @@ fn test_revoke_unauthorized() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -318,7 +323,8 @@ fn test_revoke_already_vested() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -362,7 +368,8 @@ fn test_claim_too_early() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -425,7 +432,8 @@ fn test_deposit_unauthorized() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 }
@@ -461,7 +469,8 @@ fn test_deposit_rejects_oversized_batch() {
         &amounts, 
         &0, 
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &matching_memos(&env, recipients.len())
     );
 }
@@ -498,7 +507,8 @@ fn test_events_emission() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, ""), String::from_str(&env, "")])
     );
 
@@ -513,10 +523,11 @@ fn test_events_emission() {
             if topic == deposit_symbol {
                 let evt_sender: Address = topics.get(1).unwrap().into_val(&env);
                 let evt_recipient: Address = topics.get(2).unwrap().into_val(&env);
-                let (evt_amount, evt_start, evt_end, evt_step, evt_token, _evt_memo): (i128, u64, u64, u64, Address, String) = data.into_val(&env);
+                let (evt_amount, evt_start, evt_end, evt_cliff, evt_step, evt_token, _evt_memo): (i128, u64, u64, u64, u64, Address, String) = data.into_val(&env);
                 assert_eq!(evt_sender, sender);
                 assert_eq!(evt_start, 0);
                 assert_eq!(evt_end, unlock_time);
+                assert_eq!(evt_cliff, 0);
                 assert_eq!(evt_step, 0);
                 assert_eq!(evt_token, token.address);
                 if evt_recipient == recipient1 {
@@ -609,7 +620,8 @@ fn test_multiple_vestings_different_unlocks() {
         &amounts_first,
         &0,
         &unlock_time_first,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -622,7 +634,8 @@ fn test_multiple_vestings_different_unlocks() {
         &amounts_second,
         &0,
         &unlock_time_second,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -683,7 +696,8 @@ fn test_batch_revoke_by_sender() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, "")])
     );
 
@@ -748,7 +762,8 @@ fn test_batch_revoke_by_admin_fails() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, ""), String::from_str(&env, "")])
     );
 
@@ -814,7 +829,8 @@ fn test_batch_revoke_multiple_senders_fails_for_admin() {
         &Vec::from_array(&env, [100]),
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -826,7 +842,8 @@ fn test_batch_revoke_multiple_senders_fails_for_admin() {
         &Vec::from_array(&env, [200]),
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -895,7 +912,8 @@ fn test_batch_revoke_unauthorized() {
         &amounts, 
         &0, 
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, ""), String::from_str(&env, "")])
     );
 
@@ -963,7 +981,8 @@ fn test_batch_revoke_already_vested() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, ""), String::from_str(&env, "")])
     );
 
@@ -1074,7 +1093,8 @@ fn test_batch_revoke_events_emission() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, ""), String::from_str(&env, "")])
     );
 
@@ -1166,7 +1186,8 @@ fn test_batch_revoke_partial_recipients() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, "")])
     );
 
@@ -1258,7 +1279,8 @@ fn test_batch_revoke_partial_success() {
         &Vec::from_array(&env, [100i128]),
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -1270,7 +1292,8 @@ fn test_batch_revoke_partial_success() {
         &Vec::from_array(&env, [200i128]),
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -1282,7 +1305,8 @@ fn test_batch_revoke_partial_success() {
         &Vec::from_array(&env, [300i128]),
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -1375,7 +1399,8 @@ fn test_batch_revoke_mixed_valid_and_invalid() {
         &Vec::from_array(&env, [150i128, 250i128]),
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, ""), String::from_str(&env, "")])
     );
 
@@ -1503,6 +1528,7 @@ fn test_claim_multi_token() {
         &0,
         &1000,
         &0,
+        &0,
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
     client.deposit(
@@ -1512,6 +1538,7 @@ fn test_claim_multi_token() {
         &Vec::from_array(&env, [200]),
         &0,
         &1000,
+        &0,
         &0,
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
@@ -1563,7 +1590,8 @@ fn test_deposit_schedule_limit_exceeded() {
             &Vec::from_array(&env, [10i128]),
             &0,
             &unlock,
-            &0,
+            &0, // cliff
+            &0, // step
             &Vec::from_array(&env, [String::from_str(&env, "")])
         );
     }
@@ -1576,7 +1604,8 @@ fn test_deposit_schedule_limit_exceeded() {
         &Vec::from_array(&env, [10i128]),
         &0,
         &(2000 + u64::from(MAX_SCHEDULES_PER_RECIPIENT) * 100),
-        &0,
+        &0, // cliff
+        &0, // step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 }
@@ -1615,7 +1644,8 @@ fn test_batch_revoke_multiple_schedules_same_recipient() {
         &Vec::from_array(&env, [100i128]),
         &0,
         &1000u64,
-        &0,
+        &0, // cliff
+        &0, // step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
     client.deposit(
@@ -1625,7 +1655,8 @@ fn test_batch_revoke_multiple_schedules_same_recipient() {
         &Vec::from_array(&env, [200i128]),
         &0,
         &2000u64,
-        &0,
+        &0, // cliff
+        &0, // step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
     client.deposit(
@@ -1635,7 +1666,8 @@ fn test_batch_revoke_multiple_schedules_same_recipient() {
         &Vec::from_array(&env, [300i128]),
         &0,
         &3000u64,
-        &0,
+        &0, // cliff
+        &0, // step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -1789,6 +1821,7 @@ fn test_get_vestings_pagination() {
             &0,
             &(1000 + i * 100),
             &0,
+            &0,
             &Vec::from_array(&env, [String::from_str(&env, "")])
         );
     }
@@ -1859,16 +1892,18 @@ fn test_deposit_event_includes_token_address() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
-    let payload: (i128, u64, u64, u64, Address, String) = find_event_data(&env, "VestingDeposited");
+    let payload: (i128, u64, u64, u64, u64, Address, String) = find_event_data(&env, "VestingDeposited");
     assert_eq!(payload.0, 100i128, "amount mismatch");
     assert_eq!(payload.1, 0u64, "start_time mismatch");
     assert_eq!(payload.2, 1000u64, "end_time mismatch");
-    assert_eq!(payload.3, 0u64, "vesting_step mismatch");
-    assert_eq!(payload.4, token.address, "token address missing from deposit event");
+    assert_eq!(payload.3, 0u64, "cliff_time mismatch");
+    assert_eq!(payload.4, 0u64, "vesting_step mismatch");
+    assert_eq!(payload.5, token.address, "token address missing from deposit event");
 }
 
 #[test]
@@ -1895,7 +1930,8 @@ fn test_claim_event_includes_token_address() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -1931,7 +1967,8 @@ fn test_revoke_event_includes_token_address() {
         &amounts,
         &0,
         &unlock_time,
-        &0,
+        &0, // cliff_time
+        &0, // vesting_step
         &Vec::from_array(&env, [String::from_str(&env, "")])
     );
 
@@ -1975,6 +2012,7 @@ fn test_deposit_overflow() {
         &amounts,
         &start_time,
         &end_time,
+        &start_time,
         &0,
         &Vec::from_array(&env, [String::from_str(&env, ""), String::from_str(&env, "")])
     );
@@ -2388,6 +2426,7 @@ fn test_partial_claim_keeps_schedule_active() {
         &0,
         &1000,
         &0,
+        &0,
         &Vec::from_array(&env, [String::from_str(&env, "")]),
     );
 
@@ -2432,6 +2471,7 @@ fn test_partial_claim_capped_at_claimable() {
         &0,
         &1000,
         &0,
+        &0,
         &Vec::from_array(&env, [String::from_str(&env, "")]),
     );
 
@@ -2466,6 +2506,7 @@ fn test_partial_claim_before_unlock_fails() {
         &0,
         &1000,
         &0,
+        &0,
         &Vec::from_array(&env, [String::from_str(&env, "")]),
     );
 
@@ -2496,7 +2537,8 @@ fn test_partial_claim_zero_amount_fails() {
         &Vec::from_array(&env, [100i128]),
         &0,
         &1000,
-        &0,
+        &0, // cliff
+        &0, // step
         &Vec::from_array(&env, [String::from_str(&env, "")]),
     );
 
