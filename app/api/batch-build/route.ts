@@ -18,6 +18,7 @@ import {
   StrKey,
 } from "stellar-sdk";
 import { safeJsonResponse } from "@/lib/safe-json";
+import { horizonUrl } from "@/lib/stellar/network-config";
 
 import { createBatches, parseAsset } from "@/lib/stellar/batcher";
 import {
@@ -95,10 +96,9 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Build unsigned XDRs ──────────────────────────────────────
-    const serverUrl =
-      network === "testnet"
-        ? "https://horizon-testnet.stellar.org"
-        : "https://horizon.stellar.org";
+    // #272: Horizon URL is env-configurable so deployments can point
+    // at dedicated RPC providers; falls back to the public SDF node.
+    const serverUrl = horizonUrl(network);
     const server = new Horizon.Server(serverUrl);
 
     const sourceAccount = await server.loadAccount(publicKey);
