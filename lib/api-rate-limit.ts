@@ -15,12 +15,67 @@ type RateBucket = {
   resetAt: number;
 };
 
-const endpointLimits: Record<EndpointKey, EndpointLimit> = {
+// #271: env-tunable defaults. The shipping numbers below are kept as
+// the deployment baseline; each tier of each endpoint can be raised
+// or lowered without a code change via the matching env var:
+//
+//   RATE_LIMIT_<ENDPOINT>_<TIER>=<requests-per-window>
+//   RATE_LIMIT_<ENDPOINT>_WINDOW_MS=<milliseconds>
+//
+// e.g. `RATE_LIMIT_BATCH_BUILD_PRO=50`. Missing / non-numeric env
+// values fall back to the shipped defaults so dev keeps working.
+function intEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function envKey(endpoint: EndpointKey): string {
+  // batch-build → BATCH_BUILD
+  return endpoint.toUpperCase().replace(/-/g, "_");
+}
+
+function tunedLimit(
+  endpoint: EndpointKey,
+  defaults: EndpointLimit,
+): EndpointLimit {
+  const k = envKey(endpoint);
+  return {
+    free: intEnv(`RATE_LIMIT_${k}_FREE`, defaults.free),
+    pro: intEnv(`RATE_LIMIT_${k}_PRO`, defaults.pro),
+    enterprise: intEnv(`RATE_LIMIT_${k}_ENTERPRISE`, defaults.enterprise),
+    windowMs: intEnv(`RATE_LIMIT_${k}_WINDOW_MS`, defaults.windowMs),
+  };
+}
+
+const DEFAULT_LIMITS: Record<EndpointKey, EndpointLimit> = {
   "batch-build": { free: 8, pro: 20, enterprise: 60, windowMs: 60_000 },
   "batch-submit": { free: 5, pro: 15, enterprise: 45, windowMs: 60_000 },
   "batch-submit-signed": { free: 5, pro: 15, enterprise: 45, windowMs: 60_000 },
   "webhook-register": { free: 3, pro: 10, enterprise: 30, windowMs: 60_000 },
 };
+
+const endpointLimits: Record<EndpointKey, EndpointLimit> = {
+  "batch-build": tunedLimit("batch-build", DEFAULT_LIMITS["batch-build"]),
+  "batch-submit": tunedLimit("batch-submit", DEFAULT_LIMITS["batch-submit"]),
+  "batch-submit-signed": tunedLimit(
+    "batch-submit-signed",
+    DEFAULT_LIMITS["batch-submit-signed"],
+  ),
+  "webhook-register": tunedLimit(
+    "webhook-register",
+    DEFAULT_LIMITS["webhook-register"],
+  ),
+};
+
+/**
+ * Read-only accessor for the configured limits. Useful for tests +
+ * an `/api/health` style endpoint.
+ */
+export function getEndpointLimits(): Record<EndpointKey, EndpointLimit> {
+  return endpointLimits;
+}
 
 const buckets = new Map<string, RateBucket>();
 

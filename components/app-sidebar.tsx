@@ -3,15 +3,15 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { 
-  LayoutDashboard, 
-  PlusCircle, 
-  History, 
-  BarChart3, 
-  Settings, 
-  FileText, 
+import {
+  LayoutDashboard,
+  PlusCircle,
+  History,
+  Settings,
+  FileText,
   MoreVertical,
-  BookOpen 
+  BookOpen,
+  Clock
 } from "lucide-react"
 
 import {
@@ -43,10 +43,15 @@ const navItems = [
     url: "/dashboard/history",
     icon: History,
   },
+  // #359: Analytics removed from the sidebar until the metrics API
+  // is real. The previous link pointed at /dashboard/analytics, which
+  // had no corresponding `app/dashboard/analytics/page.tsx` and 404'd
+  // — and the PaymentVolumeChart was rendering hard-coded data. Add
+  // back once the metrics endpoint is wired (Option A in the issue).
   {
-    title: "Analytics",
-    url: "/dashboard/analytics",
-    icon: BarChart3,
+    title: "Batch Vesting",
+    url: "/dashboard/vesting",
+    icon: Clock,
   },
   {
     title: "Address Book",

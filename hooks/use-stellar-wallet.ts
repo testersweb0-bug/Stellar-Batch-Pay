@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useFreighter } from "./use-freighter";
 import { isMobileDevice, generateSep7TxUri } from "@/lib/stellar/sep7";
+import { Sep7RedirectError } from "@/lib/stellar/sep7-redirect";
 import { useToast } from "./use-toast";
 import { useLedger, type LedgerState } from "./use-ledger";
 
@@ -101,10 +102,15 @@ export function useStellarWallet(): UseStellarWalletReturn {
                 setSep7Uri(uri);
                 setIsSep7ModalOpen(true);
 
-                // Return a promise that never resolves here because the user is 
-                // redirecting away or using a QR code. The app will need to 
-                // poll for the transaction completion separately.
-                return new Promise(() => { });
+                // #268: previously this branch returned a Promise
+                // that never resolves, which left every caller stuck
+                // in their "signing" state forever. The mobile
+                // signing flow is inherently asymmetric (the wallet
+                // signs out-of-band after the user is redirected),
+                // so throwing a typed sentinel error lets the UI
+                // catch it and switch to a polling screen rather
+                // than hang on a never-settling await.
+                throw new Sep7RedirectError(uri);
             }
 
             // Default to Freighter if on desktop

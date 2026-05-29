@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { TransactionBuilder, Horizon, Networks } from "stellar-sdk";
 import { safeJsonResponse } from "@/lib/safe-json";
 import { applyRateLimit, setRateLimitHeaders } from "@/lib/api-rate-limit";
+import { horizonUrl } from "@/lib/stellar/network-config";
 
 interface RequestBody {
     signedXdr: string;
@@ -79,10 +80,9 @@ export async function POST(request: NextRequest) {
             networkPassphrase,
         );
 
-        const serverUrl =
-            network === "testnet"
-                ? "https://horizon-testnet.stellar.org"
-                : "https://horizon.stellar.org";
+        // #272: Horizon URL is env-configurable; falls back to the
+        // public SDF node when nothing is set.
+        const serverUrl = horizonUrl(network);
         const server = new Horizon.Server(serverUrl);
 
         try {

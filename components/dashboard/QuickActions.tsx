@@ -10,6 +10,11 @@ interface QuickActionsProps {
   className?: string;
 }
 
+// #361: each Quick Action was purely visual before — no Link, no
+// router.push, no onClick — so clicking did nothing and frustrated
+// users who expected navigation. Wired below to the existing dashboard
+// routes; "Download Template" lands on the new-batch upload step
+// where the file-format documentation + sample CSV already live.
 export function QuickActions({ className }: QuickActionsProps) {
   return (
     <Card className={cn("border-[#1F2937] bg-[#121827]", className)}>
@@ -18,9 +23,13 @@ export function QuickActions({ className }: QuickActionsProps) {
 
         <Button
           asChild
-          className="w-full h-12 bg-[#00D98B] hover:bg-[#00D98B]/90 text-white font-semibold rounded-lg flex items-center justify-center gap-2"
+          className="w-full h-12 bg-[#00D98B] hover:bg-[#00D98B]/90 text-white font-semibold rounded-lg"
         >
-          <Link href="/dashboard/new-batch" aria-label="Start a new batch payment">
+          <Link
+            href="/dashboard/new-batch"
+            aria-label="Start a new batch payment"
+            className="flex w-full items-center justify-center gap-2"
+          >
             <Plus className="h-5 w-5" />
             Start New Batch Payment
           </Link>
@@ -29,24 +38,28 @@ export function QuickActions({ className }: QuickActionsProps) {
         <Button
           asChild
           variant="ghost"
-          className="w-full h-12 bg-[#1F2937]/30 hover:bg-[#1F2937]/50 text-gray-300 font-medium rounded-lg flex items-center justify-center gap-2"
+          className="w-full h-12 bg-[#1F2937]/30 hover:bg-[#1F2937]/50 text-gray-300 font-medium rounded-lg"
         >
-          <a
-            href="/templates/batch-payments-template.csv"
-            download="batch-payments-template.csv"
-            aria-label="Download the CSV template for batch payments"
+          <Link
+            href="/dashboard/new-batch?step=upload"
+            aria-label="Download CSV template and upload payments"
+            className="flex w-full items-center justify-center gap-2"
           >
             <Download className="h-4 w-4" />
             Download Template
-          </a>
+          </Link>
         </Button>
 
         <Button
           asChild
           variant="ghost"
-          className="w-full h-12 bg-[#1F2937]/30 hover:bg-[#1F2937]/50 text-gray-300 font-medium rounded-lg flex items-center justify-center gap-2"
+          className="w-full h-12 bg-[#1F2937]/30 hover:bg-[#1F2937]/50 text-gray-300 font-medium rounded-lg"
         >
-          <Link href="/dashboard/history" aria-label="View your recent batches">
+          <Link
+            href="/dashboard/history"
+            aria-label="View recent batch history"
+            className="flex w-full items-center justify-center gap-2"
+          >
             <RotateCcw className="h-4 w-4" />
             View Recent Batches
           </Link>
