@@ -53,6 +53,7 @@ function getDb(): Database.Database {
       totalBatches     INTEGER NOT NULL DEFAULT 0,
       completedBatches INTEGER NOT NULL DEFAULT 0,
       payments         TEXT NOT NULL,
+      signedTransactions TEXT,
       network          TEXT NOT NULL,
       result           TEXT,
       error            TEXT,
@@ -63,6 +64,11 @@ function getDb(): Database.Database {
     -- Index for history queries ordered by creation time
     CREATE INDEX IF NOT EXISTS idx_jobs_createdAt ON jobs (createdAt DESC);
   `);
+
+  const columns = _db.prepare(`PRAGMA table_info(jobs)`).all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === 'signedTransactions')) {
+    _db.prepare(`ALTER TABLE jobs ADD COLUMN signedTransactions TEXT`).run();
+  }
 
   return _db;
 }
@@ -77,6 +83,7 @@ interface JobRow {
   totalBatches: number;
   completedBatches: number;
   payments: string;
+  signedTransactions: string | null;
   network: "testnet" | "mainnet";
   result: string | null;
   error: string | null;
@@ -91,6 +98,9 @@ function rowToJobState(row: JobRow): JobState {
     totalBatches: row.totalBatches,
     completedBatches: row.completedBatches,
     payments: JSON.parse(row.payments) as PaymentInstruction[],
+    signedTransactions: row.signedTransactions
+      ? (JSON.parse(row.signedTransactions) as string[])
+      : undefined,
     network: row.network,
     result: row.result ? (JSON.parse(row.result) as BatchResult) : undefined,
     error: row.error ?? undefined,
@@ -117,9 +127,16 @@ export function createJob(
   const now = new Date().toISOString();
 
   db.prepare(`
-    INSERT INTO jobs (jobId, status, totalBatches, completedBatches, payments, network, createdAt, updatedAt)
-    VALUES (?, 'queued', 0, 0, ?, ?, ?, ?)
-  `).run(jobId, JSON.stringify(payments), network, now, now);
+    INSERT INTO jobs (jobId, status, totalBatches, completedBatches, payments, signedTransactions, network, createdAt, updatedAt)
+    VALUES (?, 'queued', 0, 0, ?, ?, ?, ?, ?)
+  `).run(
+    jobId,
+    JSON.stringify(payments),
+    signedTransactions ? JSON.stringify(signedTransactions) : null,
+    network,
+    now,
+    now,
+  );
 
   return jobId;
 }
@@ -156,11 +173,11 @@ export function updateJob(
       updatedAt        = ?
     WHERE jobId = ?
   `).run(
-    patch.status           ?? row.status,
-    patch.totalBatches     ?? row.totalBatches,
+    patch.status ?? row.status,
+    patch.totalBatches ?? row.totalBatches,
     patch.completedBatches ?? row.completedBatches,
     patch.result !== undefined ? JSON.stringify(patch.result) : row.result,
-    patch.error            ?? row.error,
+    patch.error ?? row.error,
     now,
     jobId,
   );
@@ -191,7 +208,7 @@ export function getAllJobs(opts?: {
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  const limit  = opts?.limit  ?? 50;
+  const limit = opts?.limit ?? 50;
   const offset = opts?.offset ?? 0;
 
   params.push(limit, offset);

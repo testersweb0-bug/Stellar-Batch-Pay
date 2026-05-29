@@ -8,6 +8,7 @@ import { ConnectWalletButton } from "@/components/connect-wallet-button";
 import { BatchDryRun } from "@/components/dashboard/BatchDryRun";
 import { CsvValidationErrors } from "@/components/csv-validation-errors";
 import { JobProgress } from "@/components/job-progress";
+import { ResultsDisplay } from "@/components/results-display";
 import { useWallet } from "@/contexts/WalletContext";
 import { parsePaymentFile, getBatchSummary } from "@/lib/stellar";
 import type { ParsedPaymentFile, BatchResult, JobStatus, PaymentInstruction } from "@/lib/stellar/types";
@@ -82,6 +83,7 @@ export default function NewBatchPaymentPage() {
   const [skippedIndices, setSkippedIndices] = useState<number[]>([]);
   const [convertedIndices, setConvertedIndices] = useState<number[]>([]);
   const { publicKey, signTx } = useWallet();
+  const allowServerSigning = process.env.NEXT_PUBLIC_ALLOW_SERVER_SIGNING === "true";
 
   const handleSkipToggle = (index: number) => {
     setSkippedIndices(prev => {
@@ -107,6 +109,25 @@ export default function NewBatchPaymentPage() {
       }
       return next;
     });
+  };
+
+  const handleRetryFailed = (failedPayments: PaymentInstruction[]) => {
+    const rows = failedPayments.map((instruction, index) => ({
+      rowNumber: index + 1,
+      instruction,
+      valid: true,
+    }));
+
+    setValidationResult({
+      rows,
+      validPayments: failedPayments,
+      invalidCount: 0,
+    });
+    setSummary(getBatchSummary(failedPayments));
+    setSkippedIndices([]);
+    setConvertedIndices([]);
+    setStep(2);
+    toast.success('Loaded failed payments for retry. Review before resubmitting.');
   };
 
   // UX: Warn before closing tab during submission (#287)
@@ -202,6 +223,18 @@ export default function NewBatchPaymentPage() {
         <ConnectWalletButton />
       </div>
 
+      <div className="rounded-lg border p-4 text-sm mt-4">
+        {allowServerSigning ? (
+          <div className="border border-amber-500 bg-amber-500/10 text-amber-100 p-3 rounded-md">
+            <strong>Warning:</strong> Server-side signing is enabled in this deployment. Client-side wallet signing is still required for secure batch submission and is recommended for all operations.
+          </div>
+        ) : (
+          <div className="border border-emerald-500 bg-emerald-500/10 text-emerald-100 p-3 rounded-md">
+            Client-side wallet signing is enforced. Server-side signing is disabled unless <code>ALLOW_SERVER_SIGNING=true</code> is configured on the server.
+          </div>
+        )}
+      </div>
+
       {/* Stepper */}
       <div className="mb-8 pt-4">
         <div className="flex items-center justify-between relative max-w-2xl mx-auto">
@@ -216,10 +249,10 @@ export default function NewBatchPaymentPage() {
                 disabled={step < s.id && (s.id > 1 && (!file || !summary))}
                 onClick={() => setStep(s.id)}
                 className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-colors border-2 outline-hidden disabled:cursor-not-allowed ${step > s.id
-                    ? "bg-emerald-500 border-emerald-500 text-white cursor-pointer hover:bg-emerald-600"
-                    : step === s.id
-                      ? "bg-[#0B0F1A] border-emerald-500 text-emerald-500"
-                      : "bg-[#0B0F1A] border-slate-700 text-slate-500"
+                  ? "bg-emerald-500 border-emerald-500 text-white cursor-pointer hover:bg-emerald-600"
+                  : step === s.id
+                    ? "bg-[#0B0F1A] border-emerald-500 text-emerald-500"
+                    : "bg-[#0B0F1A] border-slate-700 text-slate-500"
                   }`}
               >
                 {step > s.id ? <Check className="w-4 h-4" /> : s.id}
@@ -395,7 +428,7 @@ export default function NewBatchPaymentPage() {
                   <p className="text-sm text-slate-400">
                     Review and confirm your batch payment before submitting to the network.
                   </p>
-                  <Button 
+                  <Button
                     className="w-full bg-emerald-500 hover:bg-emerald-600 text-white"
                     onClick={() => setStep(3)}
                     disabled={summary.validCount === 0}
@@ -426,27 +459,57 @@ export default function NewBatchPaymentPage() {
             onSkipToggle={handleSkipToggle}
             onConvertToggle={handleConvertToggle}
             onSubmit={async (filteredPayments) => {
-              // Submit to API
-              if (!publicKey) return;
+              if (!publicKey || !signTx) {
+                toast.error('Connect your wallet to sign the batch before submitting.');
+                return;
+              }
               setIsSubmitting(true);
+              setJobStatus("queued");
+              setCompletedBatches(0);
+              setTotalBatches(0);
+
               try {
-                const response = await fetch('/api/batch-submit', {
+                const buildResponse = await fetch('/api/batch-build', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     payments: filteredPayments,
                     network: selectedNetwork,
+                    publicKey,
                   }),
                 });
-                const data = await response.json();
-                if (!response.ok) {
-                  throw new Error(data.error || 'Failed to submit batch');
+
+                const buildData = await buildResponse.json();
+                if (!buildResponse.ok) {
+                  throw new Error(buildData.error || 'Failed to build transactions');
                 }
-                setJobId(data.jobId);
+
+                const { xdrs } = buildData;
+                const signedTransactions: string[] = [];
+
+                for (const xdr of xdrs) {
+                  signedTransactions.push(await signTx(xdr, selectedNetwork));
+                }
+
+                const submitResponse = await fetch('/api/batch-submit', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    payments: filteredPayments,
+                    signedTransactions,
+                    network: selectedNetwork,
+                  }),
+                });
+
+                const submitData = await submitResponse.json();
+                if (!submitResponse.ok) {
+                  throw new Error(submitData.error || 'Failed to submit signed batch');
+                }
+
+                setJobId(submitData.jobId);
                 setJobStatus("queued");
-                setCompletedBatches(0);
-                setTotalBatches(0);
-                startPolling(data.jobId);
+                startPolling(submitData.jobId);
+                setStep(4);
               } catch (error) {
                 console.error('Batch submission error:', error);
                 setIsSubmitting(false);
@@ -481,30 +544,36 @@ export default function NewBatchPaymentPage() {
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
           <Card className="bg-slate-900/50 border-slate-800">
             <CardHeader>
-              <CardTitle className="text-lg text-white">Batch Submitted</CardTitle>
+              <CardTitle className="text-lg text-white">Batch Results</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-2 text-emerald-400">
                 <CheckCircle2 className="w-5 h-5" />
                 <span>Your batch has been submitted successfully.</span>
               </div>
-              <div className="text-sm text-slate-400">
-                Batch ID: <span className="font-mono text-white">{result.batchId}</span>
-              </div>
-              <div className="text-sm text-slate-400">
-                Total Payments: {result.totalRecipients}
-              </div>
-              <div className="pt-4">
-                <Button
-                  onClick={() => setStep(1)}
-                  variant="outline"
-                  className="border-slate-800 text-slate-300 hover:bg-slate-800"
-                >
-                  Create New Batch
-                </Button>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div className="text-slate-400">
+                  Batch ID: <span className="font-mono text-white">{result.batchId}</span>
+                </div>
+                <div className="text-slate-400">
+                  Total Payments: {result.totalRecipients}
+                </div>
+                <div className="text-slate-400">
+                  Network: {result.network}
+                </div>
               </div>
             </CardContent>
           </Card>
+
+          <ResultsDisplay result={result} onRetry={handleRetryFailed} />
+
+          <Button
+            onClick={() => setStep(1)}
+            variant="outline"
+            className="border-slate-800 text-slate-300 hover:bg-slate-800"
+          >
+            Create New Batch
+          </Button>
         </div>
       )}
     </div>

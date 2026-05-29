@@ -59,10 +59,24 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Create a job for pre-signed transactions
-      // signedTransactions are passed as-is without needing a secret key
-      const jobId = createJob([], network, signedTransactions);
-      void processJobInBackground(jobId, [], network, undefined, signedTransactions);
+      const paymentsForJob = Array.isArray(body.payments) ? body.payments : [];
+      if (paymentsForJob.length > 0) {
+        const validation = validatePaymentInstructions(paymentsForJob);
+        if (!validation.valid) {
+          const errors = Array.from(validation.errors.entries())
+            .map(([idx, err]) => `Row ${idx}: ${err}`)
+            .slice(0, 5);
+          return NextResponse.json(
+            { error: `Invalid payment instructions: ${errors.join("; ")}` },
+            { status: 400 },
+          );
+        }
+      }
+
+      // Create a job for pre-signed transactions. When the original payments
+      // are available, preserve them to support accurate batch results and retry.
+      const jobId = createJob(paymentsForJob, network, signedTransactions);
+      void processJobInBackground(jobId, paymentsForJob, network, undefined, signedTransactions);
 
       return setRateLimitHeaders(safeJsonResponse(
         {
@@ -86,11 +100,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const allowServerSigning = process.env.ALLOW_SERVER_SIGNING === "true";
+    if (!allowServerSigning) {
+      return NextResponse.json(
+        {
+          error:
+            "Server-side signing is disabled. Use client-side signing with a connected wallet, or enable ALLOW_SERVER_SIGNING=true in server configuration.",
+        },
+        { status: 403 },
+      );
+    }
+
     // Get secret key from environment
     const secretKey = process.env.STELLAR_SECRET_KEY;
     if (!secretKey) {
       return NextResponse.json(
-        { error: "STELLAR_SECRET_KEY is not configured. Please use client-side signing or configure server-side signing." },
+        { error: "STELLAR_SECRET_KEY is not configured. Please configure server-side signing or use client-side signing." },
         { status: 500 },
       );
     }
