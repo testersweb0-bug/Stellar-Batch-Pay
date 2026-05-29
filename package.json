@@ -8,7 +8,7 @@
   "type": "module",
   "main": "index.js",
   "bin": {
-    "stellar-batch-pay": "./cli/index.js"
+    "stellar-batch-pay": "./cli/index.mjs"
   },
   "directories": {
     "example": "examples",
@@ -20,9 +20,9 @@
     "dev": "next dev",
     "lint": "next lint",
     "start": "next start",
-    "test": "vitest run tests/",
-    "cli": "tsx cli/index.ts",
-    "cli:smoke": "tsx cli/index.ts --help"
+    "cli": "node cli/index.mjs",
+    "cli:help": "node cli/index.mjs --help",
+    "test": "vitest run tests/"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
