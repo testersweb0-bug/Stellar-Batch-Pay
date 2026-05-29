@@ -2,6 +2,11 @@
 
 import { useState, useEffect } from "react";
 
+export interface DashboardMetricsTimeSeriesPoint {
+  date: string;
+  amount: number;
+}
+
 export interface DashboardMetrics {
   totalPayments: number;
   totalAmountSent: string;
@@ -13,7 +18,11 @@ export interface DashboardMetrics {
   activeBatchesTrend?: string;
 }
 
-export function useDashboardMetrics(publicKey: string | null, network: "testnet" | "mainnet") {
+export function useDashboardMetrics(
+  publicKey: string | null,
+  network: "testnet" | "mainnet",
+  range?: "7d" | "30d" | "90d",
+) {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,9 +38,12 @@ export function useDashboardMetrics(publicKey: string | null, network: "testnet"
       setError(null);
 
       try {
-        const response = await fetch(
-          `/api/dashboard-metrics?publicKey=${encodeURIComponent(publicKey)}&network=${network}`
-        );
+        const params = new URLSearchParams({
+          publicKey,
+          network,
+        });
+        if (range) params.set("range", range);
+        const response = await fetch(`/api/dashboard-metrics?${params.toString()}`);
 
         if (!response.ok) {
           throw new Error(`Failed to fetch metrics: ${response.statusText}`);
@@ -54,7 +66,7 @@ export function useDashboardMetrics(publicKey: string | null, network: "testnet"
     };
 
     fetchMetrics();
-  }, [publicKey, network]);
+  }, [publicKey, network, range]);
 
   return { metrics, loading, error };
 }
