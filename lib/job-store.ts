@@ -8,6 +8,7 @@
  * ──────
  * jobs
  *   jobId       TEXT PRIMARY KEY
+ *   publicKey   TEXT            -- Stellar wallet that owns the job
  *   status      TEXT NOT NULL
  *   totalBatches    INTEGER NOT NULL DEFAULT 0
  *   completedBatches INTEGER NOT NULL DEFAULT 0
@@ -55,6 +56,7 @@ function getDb(): Database.Database {
   _db.exec(`
     CREATE TABLE IF NOT EXISTS jobs (
       jobId            TEXT PRIMARY KEY,
+      publicKey        TEXT,
       status           TEXT NOT NULL,
       totalBatches     INTEGER NOT NULL DEFAULT 0,
       completedBatches INTEGER NOT NULL DEFAULT 0,
@@ -71,12 +73,11 @@ function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_jobs_createdAt ON jobs (createdAt DESC);
   `);
 
-  const columns = _db.prepare(`PRAGMA table_info(jobs)`).all() as Array<{
-    name: string;
-  }>;
-  if (!columns.some((column) => column.name === "signedTransactions")) {
-    _db.prepare(`ALTER TABLE jobs ADD COLUMN signedTransactions TEXT`).run();
+  const columns = _db.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "publicKey")) {
+    _db.exec("ALTER TABLE jobs ADD COLUMN publicKey TEXT");
   }
+  _db.exec("CREATE INDEX IF NOT EXISTS idx_jobs_publicKey_createdAt ON jobs (publicKey, createdAt DESC)");
 
   return _db;
 }
@@ -87,6 +88,7 @@ function getDb(): Database.Database {
 
 interface JobRow {
   jobId: string;
+  publicKey: string | null;
   status: JobStatus;
   totalBatches: number;
   completedBatches: number;
@@ -100,32 +102,19 @@ interface JobRow {
 }
 
 function rowToJobState(row: JobRow): JobState {
-  try {
-    return {
-      jobId: row.jobId,
-      status: row.status,
-      totalBatches: row.totalBatches,
-      completedBatches: row.completedBatches,
-      payments: JSON.parse(row.payments) as PaymentInstruction[],
-      signedTransactions: row.signedTransactions
-        ? (JSON.parse(row.signedTransactions) as string[])
-        : undefined,
-      network: row.network,
-      result: row.result ? (JSON.parse(row.result) as BatchResult) : undefined,
-      error: row.error ?? undefined,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
-  } catch (err) {
-    const parseError = err instanceof Error ? err.message : String(err);
-    console.error(
-      `Failed to parse job state for jobId ${row.jobId}: ${parseError}`,
-    );
-    throw new Error(
-      `Corrupted job data for ${row.jobId}: ${parseError}. ` +
-        `This may indicate a database corruption issue.`,
-    );
-  }
+  return {
+    jobId: row.jobId,
+    publicKey: row.publicKey,
+    status: row.status,
+    totalBatches: row.totalBatches,
+    completedBatches: row.completedBatches,
+    payments: JSON.parse(row.payments) as PaymentInstruction[],
+    network: row.network,
+    result: row.result ? (JSON.parse(row.result) as BatchResult) : undefined,
+    error: row.error ?? undefined,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -139,25 +128,17 @@ function rowToJobState(row: JobRow): JobState {
 export function createJob(
   payments: PaymentInstruction[],
   network: "testnet" | "mainnet",
+  publicKey: string,
   signedTransactions?: string[],
 ): string {
   const db = getDb();
   const jobId = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  db.prepare(
-    `
-    INSERT INTO jobs (jobId, status, totalBatches, completedBatches, payments, signedTransactions, network, createdAt, updatedAt)
-    VALUES (?, 'queued', 0, 0, ?, ?, ?, ?, ?)
-  `,
-  ).run(
-    jobId,
-    JSON.stringify(payments),
-    signedTransactions ? JSON.stringify(signedTransactions) : null,
-    network,
-    now,
-    now,
-  );
+  db.prepare(`
+    INSERT INTO jobs (jobId, publicKey, status, totalBatches, completedBatches, payments, network, createdAt, updatedAt)
+    VALUES (?, ?, 'queued', 0, 0, ?, ?, ?, ?)
+  `).run(jobId, publicKey, JSON.stringify(payments), network, now, now);
 
   return jobId;
 }
@@ -165,11 +146,11 @@ export function createJob(
 /**
  * Retrieve a job by ID. Returns undefined if not found.
  */
-export function getJob(jobId: string): JobState | undefined {
+export function getJob(jobId: string, publicKey?: string): JobState | undefined {
   const db = getDb();
-  const row = db.prepare("SELECT * FROM jobs WHERE jobId = ?").get(jobId) as
-    | JobRow
-    | undefined;
+  const row = publicKey
+    ? db.prepare("SELECT * FROM jobs WHERE jobId = ? AND publicKey = ?").get(jobId, publicKey) as JobRow | undefined
+    : db.prepare("SELECT * FROM jobs WHERE jobId = ?").get(jobId) as JobRow | undefined;
   return row ? rowToJobState(row) : undefined;
 }
 
@@ -219,6 +200,7 @@ export function getAllJobs(opts?: {
   offset?: number;
   status?: JobStatus;
   network?: "testnet" | "mainnet";
+  publicKey?: string;
 }): JobState[] {
   const db = getDb();
 
@@ -232,6 +214,10 @@ export function getAllJobs(opts?: {
   if (opts?.network) {
     conditions.push("network = ?");
     params.push(opts.network);
+  }
+  if (opts?.publicKey) {
+    conditions.push("publicKey = ?");
+    params.push(opts.publicKey);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -255,6 +241,7 @@ export function getAllJobs(opts?: {
 export function countJobs(opts?: {
   status?: JobStatus;
   network?: "testnet" | "mainnet";
+  publicKey?: string;
 }): number {
   const db = getDb();
 
@@ -268,6 +255,10 @@ export function countJobs(opts?: {
   if (opts?.network) {
     conditions.push("network = ?");
     params.push(opts.network);
+  }
+  if (opts?.publicKey) {
+    conditions.push("publicKey = ?");
+    params.push(opts.publicKey);
   }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";

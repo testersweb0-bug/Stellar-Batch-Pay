@@ -10,6 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { StrKey } from "stellar-sdk";
 import { validatePaymentInstructions } from "@/lib/stellar";
 import { MAX_UPLOAD_ROWS } from "@/lib/stellar/parser";
 import { safeJsonResponse } from "@/lib/safe-json";
@@ -21,6 +22,7 @@ import { applyRateLimit, setRateLimitHeaders } from "@/lib/api-rate-limit";
 interface RequestBody {
   payments?: PaymentInstruction[];
   network: "testnet" | "mainnet";
+  publicKey: string;
   // #300: Support for client-side signed transactions (XDR format)
   signedTransactions?: string[];
 }
@@ -32,7 +34,21 @@ export async function POST(request: NextRequest) {
   try {
     // Parse request body
     const body = (await request.json()) as RequestBody;
-    const { payments, signedTransactions, network } = body;
+    const { payments, signedTransactions, network, publicKey } = body;
+
+    if (!publicKey || typeof publicKey !== "string") {
+      return NextResponse.json(
+        { error: "publicKey is required" },
+        { status: 400 },
+      );
+    }
+
+    if (!StrKey.isValidEd25519PublicKey(publicKey)) {
+      return NextResponse.json(
+        { error: "Invalid Stellar public key checksum" },
+        { status: 400 },
+      );
+    }
 
     // Validate network
     if (!["testnet", "mainnet"].includes(network)) {
@@ -59,24 +75,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const paymentsForJob = Array.isArray(body.payments) ? body.payments : [];
-      if (paymentsForJob.length > 0) {
-        const validation = validatePaymentInstructions(paymentsForJob);
-        if (!validation.valid) {
-          const errors = Array.from(validation.errors.entries())
-            .map(([idx, err]) => `Row ${idx}: ${err}`)
-            .slice(0, 5);
-          return NextResponse.json(
-            { error: `Invalid payment instructions: ${errors.join("; ")}` },
-            { status: 400 },
-          );
-        }
-      }
-
-      // Create a job for pre-signed transactions. When the original payments
-      // are available, preserve them to support accurate batch results and retry.
-      const jobId = createJob(paymentsForJob, network, signedTransactions);
-      void processJobInBackground(jobId, paymentsForJob, network, undefined, signedTransactions);
+      // Create a job for pre-signed transactions
+      // signedTransactions are passed as-is without needing a secret key
+      const jobId = createJob([], network, publicKey, signedTransactions);
+      void processJobInBackground(jobId, [], network, undefined, signedTransactions);
 
       return setRateLimitHeaders(safeJsonResponse(
         {
@@ -148,7 +150,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create a job in the store — returns a UUID immediately
-    const jobId = createJob(payments, network);
+    const jobId = createJob(payments, network, publicKey);
 
     // Fire-and-forget: start background processing without awaiting
     void processJobInBackground(jobId, payments, network, secretKey);
