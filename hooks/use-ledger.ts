@@ -35,7 +35,7 @@ export function useLedger() {
       });
 
       const transport = await TransportWebUSB.create();
-      const stellar = new StellarApp(transport);
+      const stellar = new StellarApp(transport) as any;
 
       // Get app info to verify Stellar app is open
       const appInfo = await stellar.getAppInfo();
@@ -104,7 +104,7 @@ export function useLedger() {
       const { default: StellarApp } = await import("@ledgerhq/hw-app-str");
 
       const transport = await TransportWebUSB.create();
-      const stellar = new StellarApp(transport);
+      const stellar = new StellarApp(transport) as any;
 
       // Sign the transaction using Ledger
       const result = await stellar.signTransaction("44'/148'/0'", xdr);

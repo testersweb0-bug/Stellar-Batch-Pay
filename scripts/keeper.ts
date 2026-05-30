@@ -1,6 +1,6 @@
 // scripts/keeper.ts
 import {
-  SorobanRpc,
+  rpc as SorobanRpc,
   Networks,
   Keypair,
   TransactionBuilder,
@@ -64,8 +64,9 @@ async function sendAlert(message: string) {
 async function checkBalance(server: SorobanRpc.Server, publicKey: string) {
   try {
     const account = await server.getAccount(publicKey);
-    // native balance is usually the first element in balances array
-    const nativeBalance = account.balances.find(b => b.asset_type === 'native');
+    // SorobanRpc Account type doesn't expose balances in its TS definitions;
+    // cast to any to access the underlying Horizon balance data.
+    const nativeBalance = (account as any).balances?.find((b: any) => b.asset_type === 'native');
     const balance = Number(nativeBalance?.balance || '0');
 
     if (balance < LOW_BALANCE_THRESHOLD) {
@@ -146,8 +147,8 @@ async function fetchActiveRecipients(): Promise<string[]> {
       }
 
       for (const event of events.events) {
-        if (event.type === "contract" && Array.isArray(event.contract)) {
-          const topics = event.contract;
+        if (event.type === "contract" && Array.isArray(event.contractId)) {
+          const topics = event.contractId;
           const eventNameTopic = topics[0];
 
           // Match vesting-related event names
@@ -159,7 +160,7 @@ async function fetchActiveRecipients(): Promise<string[]> {
               eventName.includes("revoked")
             ) {
               // Extract recipient address from event data
-              const eventData = event.data;
+              const eventData = (event as any).data;
               if (Array.isArray(eventData) && eventData.length > 0) {
                 const recipientData = eventData[0];
                 if (recipientData && typeof recipientData === "object") {

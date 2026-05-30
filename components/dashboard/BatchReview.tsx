@@ -15,7 +15,7 @@ import {
 import { useWallet } from "@/contexts/WalletContext";
 import { useBalances } from "@/hooks/use-balances";
 import { useTrustlines } from "@/hooks/use-trustlines";
-import { aggregatePaymentsByAsset } from "@/utils/aggregateAssets";
+import { aggregatePaymentsByAsset, type AssetAmount } from "@/utils/aggregateAssets";
 import { validateBatchSubmission } from "@/utils/validation";
 import type { PaymentInstruction } from "@/lib/stellar/types";
 
@@ -109,12 +109,20 @@ export function BatchReview({
     [payments, skippedIndices, convertedIndices, trustlineMap],
   );
 
+  const mappedBalances = useMemo<AssetAmount[]>(() => {
+    return balances.map((bal) => ({
+      asset: bal.assetCode === "XLM" ? "XLM" : `${bal.assetCode}:${bal.assetIssuer}`,
+      total: bal.balance,
+      count: 1,
+    }));
+  }, [balances]);
+
   const validation = validateBatchSubmission(
     payments.filter(
       (_, idx) =>
         !skippedIndices.includes(idx) && !convertedIndices.includes(idx),
     ),
-    balances,
+    mappedBalances,
     missingTrustlineAddresses,
     network,
   );
