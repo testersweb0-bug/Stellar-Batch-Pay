@@ -30,6 +30,36 @@ import type {
   PaymentInstruction,
   BatchResult,
 } from "./stellar/types";
+import { escapeLikePattern } from "./history-filters";
+
+export interface IdempotentJobResult<ResponseBody> {
+  jobId: string;
+  responseBody: ResponseBody;
+  replayed: boolean;
+}
+
+export class IdempotencyConflictError extends Error {
+  constructor() {
+    super("Idempotency key already exists for a different request body");
+    this.name = "IdempotencyConflictError";
+  }
+}
+
+interface BatchJobArgs {
+  payments: PaymentInstruction[];
+  signedTransactions?: string[];
+  network: "testnet" | "mainnet";
+  publicKey: string;
+}
+
+interface IdempotencyRow {
+  idempotencyKey: string;
+  requestHash: string;
+  jobId: string;
+  responseBody: string;
+  createdAt: string;
+  expiresAt: string;
+}
 
 // ---------------------------------------------------------------------------
 // DB initialisation
@@ -37,6 +67,8 @@ import type {
 
 const DB_PATH =
   process.env.JOB_STORE_PATH ?? path.join(process.cwd(), "data", "jobs.db");
+
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
 let _db: Database.Database | null = null;
 
@@ -72,12 +104,16 @@ function getDb(): Database.Database {
     -- Index for history queries ordered by creation time
     CREATE INDEX IF NOT EXISTS idx_jobs_createdAt ON jobs (createdAt DESC);
 
-    -- Idempotency key store: maps client-generated UUIDs to jobIds (24 h TTL).
     CREATE TABLE IF NOT EXISTS idempotency_keys (
-      key       TEXT PRIMARY KEY,
-      jobId     TEXT NOT NULL,
-      createdAt TEXT NOT NULL
+      idempotencyKey   TEXT PRIMARY KEY,
+      requestHash      TEXT NOT NULL,
+      jobId            TEXT NOT NULL,
+      responseBody     TEXT NOT NULL,
+      createdAt        TEXT NOT NULL,
+      expiresAt        TEXT NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_idempotency_keys_expiresAt ON idempotency_keys (expiresAt);
   `);
 
   const columns = _db.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>;
@@ -125,6 +161,27 @@ function rowToJobState(row: JobRow): JobState {
   };
 }
 
+function insertJob(db: Database.Database, args: BatchJobArgs & { jobId: string }): void {
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO jobs (jobId, publicKey, status, totalBatches, completedBatches, payments, signedTransactions, network, createdAt, updatedAt)
+    VALUES (?, ?, 'queued', 0, 0, ?, ?, ?, ?, ?)
+  `).run(
+    args.jobId,
+    args.publicKey,
+    JSON.stringify(args.payments),
+    args.signedTransactions ? JSON.stringify(args.signedTransactions) : null,
+    args.network,
+    now,
+    now,
+  );
+}
+
+function pruneExpiredIdempotencyKeys(db: Database.Database, nowIso: string): void {
+  db.prepare("DELETE FROM idempotency_keys WHERE expiresAt <= ?").run(nowIso);
+}
+
 // ---------------------------------------------------------------------------
 // Public API  (same surface as the old in-memory store)
 // ---------------------------------------------------------------------------
@@ -142,22 +199,74 @@ export function createJob(
 ): string {
   const db = getDb();
   const jobId = crypto.randomUUID();
-  const now = new Date().toISOString();
-
-  db.prepare(`
-    INSERT INTO jobs (jobId, publicKey, status, totalBatches, completedBatches, payments, signedTransactions, network, createdAt, updatedAt)
-    VALUES (?, ?, 'queued', 0, 0, ?, ?, ?, ?, ?)
-  `).run(
-    jobId, 
-    publicKey, 
-    JSON.stringify(payments), 
-    signedTransactions ? JSON.stringify(signedTransactions) : null,
-    network, 
-    now, 
-    now
-  );
+  insertJob(db, { jobId, payments, network, publicKey, signedTransactions });
 
   return jobId;
+}
+
+export function createIdempotentJob<ResponseBody>(args: {
+  idempotencyKey: string;
+  requestHash: string;
+  payments: PaymentInstruction[];
+  network: "testnet" | "mainnet";
+  publicKey: string;
+  signedTransactions?: string[];
+  buildResponseBody: (jobId: string) => ResponseBody;
+}): IdempotentJobResult<ResponseBody> {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + IDEMPOTENCY_TTL_MS).toISOString();
+
+  const run = db.transaction(() => {
+    pruneExpiredIdempotencyKeys(db, now);
+
+    const existing = db
+      .prepare("SELECT * FROM idempotency_keys WHERE idempotencyKey = ?")
+      .get(args.idempotencyKey) as IdempotencyRow | undefined;
+
+    if (existing) {
+      if (existing.requestHash !== args.requestHash) {
+        throw new IdempotencyConflictError();
+      }
+
+      return {
+        jobId: existing.jobId,
+        responseBody: JSON.parse(existing.responseBody) as ResponseBody,
+        replayed: true,
+      } satisfies IdempotentJobResult<ResponseBody>;
+    }
+
+    const jobId = crypto.randomUUID();
+    insertJob(db, {
+      jobId,
+      payments: args.payments,
+      network: args.network,
+      publicKey: args.publicKey,
+      signedTransactions: args.signedTransactions,
+    });
+
+    const responseBody = args.buildResponseBody(jobId);
+
+    db.prepare(`
+      INSERT INTO idempotency_keys (idempotencyKey, requestHash, jobId, responseBody, createdAt, expiresAt)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      args.idempotencyKey,
+      args.requestHash,
+      jobId,
+      JSON.stringify(responseBody),
+      now,
+      expiresAt,
+    );
+
+    return {
+      jobId,
+      responseBody,
+      replayed: false,
+    } satisfies IdempotentJobResult<ResponseBody>;
+  });
+
+  return run();
 }
 
 /**
@@ -208,19 +317,22 @@ export function updateJob(
   );
 }
 
-/**
- * Return all jobs ordered by creation time descending (newest first).
- * Accepts optional filters for the batch history endpoint.
- */
-export function getAllJobs(opts?: {
-  limit?: number;
-  offset?: number;
+export interface JobQueryFilters {
   status?: JobStatus;
   network?: "testnet" | "mainnet";
   publicKey?: string;
-}): JobState[] {
-  const db = getDb();
+  /** Case-insensitive substring match on jobId, payments JSON, or result JSON. */
+  search?: string;
+  /** ISO timestamp — include jobs with createdAt >= from. */
+  from?: string;
+  /** ISO timestamp — include jobs with createdAt <= to. */
+  to?: string;
+}
 
+function buildJobQueryFilters(opts?: JobQueryFilters): {
+  where: string;
+  params: (string | number)[];
+} {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -236,18 +348,44 @@ export function getAllJobs(opts?: {
     conditions.push("publicKey = ?");
     params.push(opts.publicKey);
   }
+  if (opts?.from) {
+    conditions.push("createdAt >= ?");
+    params.push(opts.from);
+  }
+  if (opts?.to) {
+    conditions.push("createdAt <= ?");
+    params.push(opts.to);
+  }
+  if (opts?.search?.trim()) {
+    const term = `%${escapeLikePattern(opts.search.trim())}%`;
+    conditions.push(
+      "(jobId LIKE ? ESCAPE '\\' OR COALESCE(result, '') LIKE ? ESCAPE '\\' OR payments LIKE ? ESCAPE '\\')",
+    );
+    params.push(term, term, term);
+  }
 
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  return { where, params };
+}
+
+/**
+ * Return all jobs ordered by creation time descending (newest first).
+ * Accepts optional filters for the batch history endpoint.
+ */
+export function getAllJobs(opts?: JobQueryFilters & {
+  limit?: number;
+  offset?: number;
+}): JobState[] {
+  const db = getDb();
+  const { where, params } = buildJobQueryFilters(opts);
   const limit = opts?.limit ?? 50;
   const offset = opts?.offset ?? 0;
-
-  params.push(limit, offset);
 
   const rows = db
     .prepare(
       `SELECT * FROM jobs ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
     )
-    .all(...params) as JobRow[];
+    .all(...params, limit, offset) as JobRow[];
 
   return rows.map(rowToJobState);
 }
@@ -294,30 +432,9 @@ export function storeIdempotencyKey(key: string, jobId: string): void {
 /**
  * Return the total count of jobs (optionally filtered).
  */
-export function countJobs(opts?: {
-  status?: JobStatus;
-  network?: "testnet" | "mainnet";
-  publicKey?: string;
-}): number {
+export function countJobs(opts?: JobQueryFilters): number {
   const db = getDb();
-
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (opts?.status) {
-    conditions.push("status = ?");
-    params.push(opts.status);
-  }
-  if (opts?.network) {
-    conditions.push("network = ?");
-    params.push(opts.network);
-  }
-  if (opts?.publicKey) {
-    conditions.push("publicKey = ?");
-    params.push(opts.publicKey);
-  }
-
-  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const { where, params } = buildJobQueryFilters(opts);
   const row = db
     .prepare(`SELECT COUNT(*) as cnt FROM jobs ${where}`)
     .get(...params) as { cnt: number };
