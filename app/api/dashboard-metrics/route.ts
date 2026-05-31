@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { Horizon } from "stellar-sdk";
+import { Horizon, StrKey } from "stellar-sdk";
 import { horizonUrl } from "@/lib/stellar/network-config";
 import { applyRateLimit, setRateLimitHeaders } from "@/lib/api-rate-limit";
 
@@ -45,6 +45,13 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  if (!StrKey.isValidEd25519PublicKey(publicKey)) {
+    return NextResponse.json(
+      { error: "Invalid public key" },
+      { status: 400 },
+    );
+  }
+
   if (network !== "testnet" && network !== "mainnet") {
     return NextResponse.json(
       { error: "network must be 'testnet' or 'mainnet'" },
@@ -62,13 +69,30 @@ export async function GET(request: NextRequest) {
   const server = new Horizon.Server(horizonUrl(network));
 
   try {
-    // Get account operations (limit to recent 200 for performance)
-    const operations = await server
+    // Get account operations (limit to recent 200 per page, up to 2000 total)
+    let operationsPage = await server
       .operations()
       .forAccount(publicKey)
       .limit(200)
       .order("desc")
       .call();
+
+    const allRecords: any[] = [];
+    let truncated = false;
+
+    while (operationsPage && operationsPage.records && operationsPage.records.length > 0) {
+      allRecords.push(...operationsPage.records);
+      if (allRecords.length >= 2000) {
+        allRecords.length = 2000;
+        truncated = true;
+        break;
+      }
+      try {
+        operationsPage = await operationsPage.next();
+      } catch (err) {
+        break;
+      }
+    }
 
     let totalPayments = 0;
     let totalAmountSent = 0; // in XLM display units (Horizon returns decimal strings)
@@ -87,7 +111,7 @@ export async function GET(request: NextRequest) {
     const previousWindowStart = now - 14 * 24 * 60 * 60 * 1000;
 
     // Process operations
-    for (const op of operations.records) {
+    for (const op of allRecords) {
       if (op.type === "payment" && op.source_account === publicKey) {
         const opTime = new Date(op.created_at).getTime();
         const nativeAmount = op.asset_type === "native" ? parseFloat(op.amount) : 0;
@@ -126,7 +150,7 @@ export async function GET(request: NextRequest) {
     // Group payments by time windows (e.g., last 24 hours)
     let recentPayments = 0;
 
-    for (const op of operations.records) {
+    for (const op of allRecords) {
       if (op.type === "payment" && op.source_account === publicKey) {
         const opTime = new Date(op.created_at).getTime();
         if (opTime > oneDayAgo) {
@@ -163,7 +187,7 @@ export async function GET(request: NextRequest) {
         const key = d.toISOString().slice(0, 10);
         buckets.set(key, 0);
       }
-      for (const op of operations.records) {
+      for (const op of allRecords) {
         if (op.type !== "payment" || op.source_account !== publicKey) continue;
         const ts = new Date(op.created_at).getTime();
         if (ts < cutoff) continue;
@@ -192,6 +216,8 @@ export async function GET(request: NextRequest) {
           "pp",
         ),
         activeBatchesTrend: recentPayments > 0 ? "Last 24h" : "No active batches",
+        truncated,
+        ...(timeSeries && { timeSeries }),
       }),
       rateLimit,
     );

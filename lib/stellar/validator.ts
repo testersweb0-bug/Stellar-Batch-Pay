@@ -282,7 +282,8 @@ export function resolveAssetKey(asset: string): string {
 export function validateBalances(
   instructions: PaymentInstruction[],
   balancesMap: BalancesMap,
-  estimatedOperations: number = instructions.length,
+  estimatedOperations?: number,
+  maxOperationsPerTransaction: number = 100,
 ): BalanceValidationResult {
   // Aggregate required amounts per asset
   const requiredByAsset: Record<string, number> = {};
@@ -301,7 +302,11 @@ export function validateBalances(
   const SUBENTRY_RESERVE_XLM = 0.5; // per trustline
 
   // Calculate XLM reserves
-  const transactionFees = estimatedOperations * FEE_PER_OPERATION_XLM;
+  const finalOps = estimatedOperations !== undefined
+    ? estimatedOperations
+    : Math.ceil(instructions.length / maxOperationsPerTransaction) * maxOperationsPerTransaction;
+
+  const transactionFees = finalOps * FEE_PER_OPERATION_XLM;
   const xlmReserved = BASE_RESERVE_XLM + transactionFees;
 
   for (const [assetKey, required] of Object.entries(requiredByAsset)) {

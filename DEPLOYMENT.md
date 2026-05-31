@@ -402,25 +402,29 @@ Sentry.init({
 // Errors are automatically captured
 ```
 
-### Log Aggregation
+### Log Aggregation & Structured Request Logging
 
-Send logs to centralized service:
+The application includes a structured JSON logger located at `lib/logger.ts` and Next.js middleware that assigns a unique correlation ID (`x-request-id`) to every incoming API request. The logger automatically anonymizes sensitive Stellar public keys (e.g., truncating them to `GB3...XYZ`) and outputs logs in JSON format:
 
-```typescript
-// Example with Winston and ELK Stack
-import winston from 'winston';
-
-const logger = winston.createLogger({
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' }),
-    new winston.transports.Http({
-      host: 'logs.example.com',
-      path: '/api/logs',
-    }),
-  ],
-});
+```json
+{"level":"info","timestamp":"2026-05-31T20:00:00.000Z","requestId":"a4f9c8f0-1e0f-4d77-9db6-9afcd21b8d05","jobId":"5f8b3c20-3b02-4e63-bd4f-3f6291a13bfd","publicKey":"GB3...XYZ","network":"testnet","msg":"Batch submit job queued and background worker triggered"}
 ```
+
+#### Datadog / CloudWatch Integration
+
+1. **Datadog log ingestion**:
+   - Ensure the Next.js runtime environment sends stdout/stderr logs directly.
+   - In Datadog log configuration, enable the JSON parser so fields like `level`, `requestId`, and `jobId` are automatically parsed into searchable attributes.
+   - Configure a mapping for standard attributes: map `level` to status, `timestamp` to date, and `msg` to message.
+
+2. **AWS CloudWatch**:
+   - Structured JSON logs are automatically parsed by CloudWatch logs.
+   - Use CloudWatch Logs Insights to query and trace invocations across serverless instances using `requestId` or `jobId`:
+     ```sql
+     fields @timestamp, level, requestId, jobId, msg
+     | filter requestId = "a4f9c8f0-1e0f-4d77-9db6-9afcd21b8d05"
+     | sort @timestamp asc
+     ```
 
 ## Database Setup (Optional)
 
